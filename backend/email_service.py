@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 from pathlib import Path
 from email.mime.multipart import MIMEMultipart
@@ -22,6 +23,16 @@ _LOGO_B64 = ""
 if _LOGO_PATH.exists():
     _LOGO_B64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
 _LOGO_SRC = f"data:image/jpeg;base64,{_LOGO_B64}" if _LOGO_B64 else ""
+
+
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def _validate_emails(addresses: list[str]) -> list[str]:
+    invalid = [a for a in addresses if not _EMAIL_RE.match(a.strip())]
+    if invalid:
+        raise ValueError(f"Direcciones de correo inválidas: {', '.join(invalid)}")
+    return [a.strip() for a in addresses]
 
 
 def _to_hhmm(minutes: int) -> str:
@@ -48,14 +59,7 @@ def build_html(date_from: str, date_to: str, summary: dict, rows: list[dict], me
         for r in rows
     )
 
-    logo_html = f'<img src="{_LOGO_SRC}" alt="C360" style="height:56px;width:56px;object-fit:contain;border-radius:10px;background:#fff;padding:4px" />' if _LOGO_SRC else ""
-    msg_block = ""
-    if message and message.strip():
-        msg_block = f"""
-        <div style="background:#FEF0E6;border-left:4px solid #E8752A;border-radius:0 8px 8px 0;padding:16px 20px;margin-bottom:24px">
-          <p style="font-size:.7rem;font-weight:700;color:#D4631A;text-transform:uppercase;letter-spacing:.06em;margin:0 0 6px">Mensaje</p>
-          <p style="font-size:.92rem;color:#37474f;margin:0;line-height:1.6;white-space:pre-line">{message}</p>
-        </div>"""
+    logo_html = f'<img src="{_LOGO_SRC}" alt="C360" style="height:48px;width:48px;object-fit:contain;border-radius:10px;background:#fff;padding:4px" />' if _LOGO_SRC else ""
 
     return f"""
 <!DOCTYPE html>
@@ -65,7 +69,7 @@ def build_html(date_from: str, date_to: str, summary: dict, rows: list[dict], me
 <style>
   body {{ font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #37474f; margin: 0; padding: 0; background: #f5f5f5; }}
   .wrap {{ max-width: 680px; margin: 24px auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,.1); }}
-  .header {{ background: #E8752A; color: #fff; padding: 0; }}
+  .header {{ background: #E8752A; color: #fff; padding: 20px 32px; display: flex; align-items: center; gap: 16px; }}
   .header h1 {{ margin: 0; font-size: 1.4rem; }}
   .header p {{ margin: 6px 0 0; opacity: .8; font-size: 0.9rem; }}
   .body {{ padding: 24px 32px; }}
@@ -87,8 +91,11 @@ def build_html(date_from: str, date_to: str, summary: dict, rows: list[dict], me
 <body>
 <div class="wrap">
   <div class="header">
-    <h1>Complemento 360 — Reporte de horas</h1>
-    <p>Período: {date_from} al {date_to}</p>
+    {logo_html}
+    <div>
+      <h1>Complemento 360 — Reporte de horas</h1>
+      <p>Período: {date_from} al {date_to}</p>
+    </div>
   </div>
   <div class="body">
     {f'''<div class="message-block">
@@ -140,6 +147,7 @@ async def send_report_email(
     recipients = list(extra_recipients) if extra_recipients else []
     if not recipients:
         raise ValueError("No hay destinatarios configurados")
+    recipients = _validate_emails(recipients)
 
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject or f"Reporte Complemento 360 · {date_from} al {date_to}"
