@@ -10,3 +10,5 @@ __pycache__/
 .idea/
 dist/
 build/
+# Backend local env
+/backend/.env
