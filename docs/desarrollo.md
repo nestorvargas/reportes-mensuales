@@ -14,7 +14,7 @@ docker compose up -d
 
 # Backend (desde backend/)
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+.venv/bin/uvicorn main:app --reload --port 8007
 
 # Frontend (desde frontend/)
 npm install
