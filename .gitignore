@@ -13,3 +13,4 @@ build/
 # Backend local env
 /backend/.env
 /reportes_enviados/
+/reportes_mensuales/
