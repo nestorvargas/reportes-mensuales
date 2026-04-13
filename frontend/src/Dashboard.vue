@@ -27,6 +27,11 @@
               <span v-if="!r.in_db" class="badge">sin importar</span>
             </span>
           </div>
+          <div v-if="data && activeMode === 'mes'" class="mes-actions">
+            <a class="btn btn-primary waves-effect waves-light" @click="openEmailModal">
+              <i class="material-icons left">email</i>Enviar reporte por correo
+            </a>
+          </div>
         </div>
       </div>
 
@@ -427,6 +432,12 @@ function renderCharts() {
 
 // ── Email ──
 function openEmailModal() {
+  if (activeMode.value === 'mes' && selectedMonth.value) {
+    const [y, m] = selectedMonth.value.split('-')
+    const lastDay = new Date(+y, +m, 0).getDate()
+    dateFrom.value = `${y}-${m}-01`
+    dateTo.value   = `${y}-${m}-${String(lastDay).padStart(2, '0')}`
+  }
   emailError.value = ''; emailSuccess.value = ''; extraEmail.value = ''
   allRecipients.value = []
   emailSubject.value = `Reporte de horas Complemento 360 · ${dateFrom.value} al ${dateTo.value}`

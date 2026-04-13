@@ -51,6 +51,34 @@ nav.app-nav {
     color: rgba(255,255,255,.8);
     &:hover { color: $surface; background: rgba(255,255,255,.1); }
   }
+
+  .nav-tabs {
+    display: flex;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 20px;
+      height: 100%;
+      color: rgba(255,255,255,.75);
+      cursor: pointer;
+      font-size: .9rem;
+      font-weight: 500;
+      border-bottom: 3px solid transparent;
+      transition: color .15s, border-color .15s;
+
+      &:hover { color: $surface; background: rgba(255,255,255,.08); }
+      &.active { color: $surface; border-bottom-color: $surface; }
+    }
+  }
 }
 
 // ── Login ─────────────────────────────────────────────────────
@@ -379,3 +407,17 @@ nav.app-nav {
   .material-icons { font-size: 64px; }
 }
 .hours-val { font-weight: 700; color: $primary; }
+
+// Importar
+.importar-wrap { margin-top: 20px; }
+.import-success { background: #e8f5e9; color: #2e7d32; border-radius: $radius-md; padding: 10px 14px; font-size: .85rem; display: flex; align-items: center; gap: 8px; }
+.import-error   { background: #ffebee; color: #c62828; border-radius: $radius-md; padding: 10px 14px; font-size: .85rem; display: flex; align-items: center; gap: 8px; }
+
+// Mes actions bar
+.mes-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 14px;
+  margin-top: 12px;
+  border-top: 1px solid $border;
+}
