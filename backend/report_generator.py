@@ -115,8 +115,16 @@ def _xl_sheet_resumen(wb, date_from, date_to, summary, rows):
     p.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[2].height = 18
 
+    ws.merge_cells("A3:F3")
+    n = ws["A3"]
+    n.value = "Nestor Fabian Vargas Ferrucho"
+    n.fill = _xl_fill(NAVY)
+    n.font = Font(color=LIGHT, size=9)
+    n.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[3].height = 14
+
     # KPI row
-    ws.row_dimensions[3].height = 6
+    ws.row_dimensions[4].height = 6
     kpis = [
         ("Total Horas", _hhmm(summary["total_minutes"])),
         ("Registros", str(len(rows))),
@@ -125,21 +133,21 @@ def _xl_sheet_resumen(wb, date_from, date_to, summary, rows):
     ]
     for i, (label, val) in enumerate(kpis):
         col = i * 2 + 1
-        ws.merge_cells(start_row=4, start_column=col, end_row=4, end_column=col + 1)
-        _xl_header_style(ws, 4, col, label, bg=LIGHT, fg=NAVY, bold=True)
-        ws.row_dimensions[4].height = 14
         ws.merge_cells(start_row=5, start_column=col, end_row=5, end_column=col + 1)
-        c = ws.cell(row=5, column=col, value=val)
+        _xl_header_style(ws, 5, col, label, bg=LIGHT, fg=NAVY, bold=True)
+        ws.row_dimensions[5].height = 14
+        ws.merge_cells(start_row=6, start_column=col, end_row=6, end_column=col + 1)
+        c = ws.cell(row=6, column=col, value=val)
         c.fill = _xl_fill(WHITE)
         c.font = Font(bold=True, size=16, color=NAVY)
         c.alignment = Alignment(horizontal="center", vertical="center")
         c.border = _xl_border()
-        ws.row_dimensions[5].height = 28
+        ws.row_dimensions[6].height = 28
 
-    ws.row_dimensions[6].height = 10
+    ws.row_dimensions[7].height = 10
 
     # By type table
-    row = 7
+    row = 8
     _xl_header_style(ws, row, 1, "Tipo de Actividad", bg=NAVY)
     _xl_header_style(ws, row, 2, "Tiempo", bg=NAVY)
     _xl_header_style(ws, row, 3, "Minutos", bg=NAVY)
@@ -379,7 +387,7 @@ def build_pdf(date_from: str, date_to: str, rows: list[dict], summary: dict) -> 
             banner_style,
         ),
     ], [
-        Paragraph(f"Reporte de horas  ·  {date_from}  →  {date_to}", sub_style),
+        Paragraph(f"Reporte de horas  ·  {date_from}  →  {date_to}  ·  Nestor Fabian Vargas Ferrucho", sub_style),
         Paragraph("", sub_style),
     ]]
     header_tbl = Table(header_data, colWidths=["55%", "45%"])

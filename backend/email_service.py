@@ -1,10 +1,10 @@
 import os
 import re
-import base64
 from pathlib import Path
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
 from email import encoders
 from dotenv import load_dotenv
 import aiosmtplib
@@ -17,12 +17,8 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
 
-# Logo embebido en base64
 _LOGO_PATH = Path(__file__).parent.parent / "frontend" / "image" / "complemento360_logo.jpeg"
-_LOGO_B64 = ""
-if _LOGO_PATH.exists():
-    _LOGO_B64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
-_LOGO_SRC = f"data:image/jpeg;base64,{_LOGO_B64}" if _LOGO_B64 else ""
+_LOGO_CID  = "logo_c360"
 
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
@@ -69,7 +65,7 @@ def build_html(date_from: str, date_to: str, summary: dict, rows: list[dict], me
         for r in rows
     )
 
-    logo_html = f'<img src="{_LOGO_SRC}" alt="C360" style="height:56px;width:56px;object-fit:contain;border-radius:12px;background:#fff;padding:6px;box-shadow:0 2px 8px rgba(0,0,0,.15)" />' if _LOGO_SRC else ""
+    logo_html = f'<img src="cid:{_LOGO_CID}" alt="C360" style="height:56px;width:56px;object-fit:contain;border-radius:12px;background:#fff;padding:6px;box-shadow:0 2px 8px rgba(0,0,0,.15)" />' if _LOGO_PATH.exists() else ""
     unique_days = len(set(r["date"] for r in rows))
 
     return f"""
@@ -84,13 +80,9 @@ def build_html(date_from: str, date_to: str, summary: dict, rows: list[dict], me
 
   /* ── Header ── */
   .header {{ background: linear-gradient(135deg, #E8752A 0%, #C65D0A 100%); padding: 0; }}
-  .header-top {{ display: flex; align-items: center; gap: 18px; padding: 28px 36px 20px; }}
-  .header-title {{ color: #fff; }}
-  .header-title h1 {{ margin: 0 0 4px; font-size: 1.35rem; font-weight: 700; letter-spacing: -.01em; }}
-  .header-title p  {{ margin: 0; font-size: .85rem; opacity: .85; }}
-  .header-banner {{ background: rgba(0,0,0,.15); padding: 12px 36px; display: flex; align-items: center; gap: 8px; }}
+  .header-banner {{ background: rgba(0,0,0,.15); padding: 12px 36px; }}
   .header-banner span {{ color: rgba(255,255,255,.8); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; }}
-  .header-banner strong {{ color: #fff; font-size: 1.6rem; font-weight: 800; margin-right: 4px; }}
+  .header-banner strong {{ color: #fff; font-size: 1.6rem; font-weight: 800; margin-right: 8px; }}
 
   /* ── Body ── */
   .body {{ padding: 28px 36px; }}
@@ -132,16 +124,18 @@ def build_html(date_from: str, date_to: str, summary: dict, rows: list[dict], me
 
   <!-- Header -->
   <div class="header">
-    <div class="header-top">
-      {logo_html}
-      <div class="header-title">
-        <h1>Complemento 360</h1>
-        <p>Reporte de horas &nbsp;·&nbsp; {date_from} al {date_to}</p>
-      </div>
-    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="padding:24px 36px 18px">
+      <tr>
+        {"<td width='68' valign='middle' style='padding-right:18px'>" + logo_html + "</td>" if logo_html else ""}
+        <td valign="middle">
+          <h1 style="margin:0 0 4px;font-size:1.35rem;font-weight:700;color:#fff;letter-spacing:-.01em">Complemento 360</h1>
+          <p style="margin:0;font-size:.85rem;color:rgba(255,255,255,.85)">Reporte de horas &nbsp;·&nbsp; {date_from} al {date_to}</p>
+        </td>
+      </tr>
+    </table>
     <div class="header-banner">
       <strong>{_to_hhmm(summary['total_minutes'])}</strong>
-      <span>horas registradas &nbsp;·&nbsp; {len(rows)} registros &nbsp;·&nbsp; {unique_days} días trabajados</span>
+      <span style="padding-left: 8px;padding-top: 4px">horas registradas &nbsp;·&nbsp; {len(rows)} registros &nbsp;·&nbsp; {unique_days} días trabajados</span>
     </div>
   </div>
 
@@ -229,10 +223,17 @@ async def send_report_email(
     msg["From"] = SMTP_FROM
     msg["To"] = ", ".join(recipients)
 
-    # HTML body
+    # HTML body con logo inline
+    related = MIMEMultipart("related")
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(build_html(date_from, date_to, summary, rows, message), "html"))
-    msg.attach(alt)
+    related.attach(alt)
+    if _LOGO_PATH.exists():
+        img = MIMEImage(_LOGO_PATH.read_bytes(), _subtype="jpeg")
+        img.add_header("Content-ID", f"<{_LOGO_CID}>")
+        img.add_header("Content-Disposition", "inline", filename="logo.jpeg")
+        related.attach(img)
+    msg.attach(related)
 
     # Excel attachment
     if excel_bytes:
