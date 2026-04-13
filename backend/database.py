@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Integer, Date, Text
+from sqlalchemy import String, Integer, Text, DateTime
+from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
 
@@ -33,6 +34,20 @@ class TimeEntry(Base):
     project: Mapped[str] = mapped_column(String(200))
     parent_id: Mapped[str] = mapped_column(String(50))
     parent_title: Mapped[str] = mapped_column(Text)
+
+
+class EmailLog(Base):
+    __tablename__ = "email_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    date_from: Mapped[str] = mapped_column(String(10))
+    date_to: Mapped[str] = mapped_column(String(10))
+    recipients: Mapped[str] = mapped_column(Text)        # JSON array as string
+    subject: Mapped[str] = mapped_column(Text)
+    total_rows: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20))      # "success" | "error"
+    error: Mapped[str] = mapped_column(Text, default="")
 
 
 async def init_db():

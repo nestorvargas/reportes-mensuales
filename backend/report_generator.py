@@ -23,12 +23,15 @@ from reportlab.platypus import (
 )
 
 # ── palette ───────────────────────────────────────────────────────────────
-NAVY   = "0F3460"
-RED    = "E94560"
-LIGHT  = "EBF3FB"
+NAVY   = "1A2744"
+ORANGE = "E8752A"
+LIGHT  = "FEF0E6"
 GRAY   = "64748B"
 WHITE  = "FFFFFF"
 BORDER_COLOR = "CBD5E1"
+
+# Alias para no romper referencias internas
+RED = ORANGE
 
 
 def _hhmm(minutes: int) -> str:
@@ -107,7 +110,7 @@ def _xl_sheet_resumen(wb, date_from, date_to, summary, rows):
     ws.merge_cells("A2:F2")
     p = ws["A2"]
     p.value = f"Período: {date_from}  →  {date_to}"
-    p.fill = _xl_fill(RED)
+    p.fill = _xl_fill(ORANGE)
     p.font = Font(color=WHITE, bold=True, size=10)
     p.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[2].height = 18
@@ -349,46 +352,59 @@ def build_pdf(date_from: str, date_to: str, rows: list[dict], summary: dict) -> 
     )
 
     styles = getSampleStyleSheet()
-    navy = _rl_color(NAVY)
-    red  = _rl_color(RED)
+    navy   = _rl_color(NAVY)
+    orange = _rl_color(ORANGE)
+    red    = orange  # alias
 
-    title_style = ParagraphStyle("title", fontSize=16, textColor=colors.white,
-                                  fontName="Helvetica-Bold", alignment=1)
-    sub_style   = ParagraphStyle("sub",   fontSize=10, textColor=colors.white,
-                                  fontName="Helvetica", alignment=1)
-    h2_style    = ParagraphStyle("h2",    fontSize=11, textColor=navy,
+    title_style = ParagraphStyle("title", fontSize=18, textColor=colors.white,
+                                  fontName="Helvetica-Bold", alignment=0, leading=22)
+    sub_style   = ParagraphStyle("sub",   fontSize=9,  textColor=colors.white,
+                                  fontName="Helvetica", alignment=0, leading=13)
+    banner_style= ParagraphStyle("banner",fontSize=9,  textColor=colors.white,
+                                  fontName="Helvetica", alignment=1, leading=13)
+    h2_style    = ParagraphStyle("h2",    fontSize=10, textColor=navy,
                                   fontName="Helvetica-Bold", spaceAfter=4)
     cell_style  = ParagraphStyle("cell",  fontSize=8,  fontName="Helvetica", leading=10)
+
+    total       = summary["total_minutes"]
+    unique_days = len({r["date"] for r in rows})
 
     elements = []
 
     # ── Header block ──
     header_data = [[
-        Paragraph("COMPLEMENTO 360 — Reporte de Horas", title_style),
+        Paragraph(f"Complemento 360", title_style),
+        Paragraph(
+            f"<b>{_hhmm(total)}</b> horas  ·  {len(rows)} registros  ·  {unique_days} días",
+            banner_style,
+        ),
     ], [
-        Paragraph(f"Período: {date_from}  →  {date_to}", sub_style),
+        Paragraph(f"Reporte de horas  ·  {date_from}  →  {date_to}", sub_style),
+        Paragraph("", sub_style),
     ]]
-    header_tbl = Table(header_data, colWidths=["100%"])
+    header_tbl = Table(header_data, colWidths=["55%", "45%"])
     header_tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), navy),
-        ("BACKGROUND", (0, 1), (-1, 1), red),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [navy, red]),
+        ("BACKGROUND",    (0, 0), (-1, -1), orange),
+        ("BACKGROUND",    (0, 1), (-1, 1),  _rl_color("C65D0A")),
+        ("ALIGN",         (1, 0), (1, 0),   "RIGHT"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, 0),  14),
+        ("BOTTOMPADDING", (0, 0), (-1, 0),  14),
+        ("TOPPADDING",    (0, 1), (-1, 1),  8),
+        ("BOTTOMPADDING", (0, 1), (-1, 1),  8),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 16),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 16),
     ]))
     elements.append(header_tbl)
     elements.append(Spacer(1, 0.4 * cm))
 
     # ── KPI cards ──
-    total = summary["total_minutes"]
     kpi_data = [[
         _kpi_cell("Total Horas", _hhmm(total)),
         _kpi_cell("Registros", str(len(rows))),
         _kpi_cell("Semanas", str(len(summary["by_week"]))),
         _kpi_cell("Work Items", str(len(summary["by_work_item"]))),
-        _kpi_cell("Días trabajados", str(len({r["date"] for r in rows}))),
+        _kpi_cell("Días trabajados", str(unique_days)),
     ]]
     kpi_tbl = Table(kpi_data, colWidths=[None] * 5)
     kpi_tbl.setStyle(TableStyle([
@@ -454,7 +470,7 @@ def build_pdf(date_from: str, date_to: str, rows: list[dict], summary: dict) -> 
 def _kpi_cell(label: str, value: str):
     return Paragraph(
         f'<para align="center"><font size="8" color="#{GRAY}">{label}</font><br/>'
-        f'<font size="18" color="#{NAVY}"><b>{value}</b></font></para>',
+        f'<font size="18" color="#{ORANGE}"><b>{value}</b></font></para>',
         ParagraphStyle("kpi", leading=22)
     )
 

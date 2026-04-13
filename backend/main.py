@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -9,12 +10,13 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
-from database import init_db, get_session, TimeEntry
+from database import init_db, get_session, TimeEntry, EmailLog
 from auth import verify_password, create_token, get_current_user, APP_USER
 from email_service import send_report_email
 from report_generator import build_excel, build_pdf
 
-REPORTS_DIR = Path(__file__).parent.parent / "reportes_mensuales"
+REPORTS_DIR  = Path(__file__).parent.parent / "reportes_mensuales"
+ENVIADOS_DIR = Path(__file__).parent.parent / "reportes_enviados"
 
 
 @asynccontextmanager
@@ -266,10 +268,59 @@ async def send_email(
             subject=subject,
             message=message,
         )
+        # Guardar archivos en reportes_enviados/<mes>/
+        month_folder = ENVIADOS_DIR / date_from[:7]
+        month_folder.mkdir(parents=True, exist_ok=True)
+        base_name = f"reporte_{date_from}_{date_to}"
+        (month_folder / f"{base_name}.xlsx").write_bytes(excel_bytes)
+        (month_folder / f"{base_name}.pdf").write_bytes(pdf_bytes)
+
+        db.add(EmailLog(
+            date_from=date_from, date_to=date_to,
+            recipients=json.dumps(sent_to),
+            subject=subject,
+            total_rows=len(rows),
+            status="success",
+        ))
+        await db.commit()
     except Exception as e:
+        db.add(EmailLog(
+            date_from=date_from, date_to=date_to,
+            recipients=json.dumps(extra or []),
+            subject=subject,
+            total_rows=len(rows),
+            status="error",
+            error=str(e),
+        ))
+        await db.commit()
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"sent_to": sent_to, "total_rows": len(rows)}
+
+
+@app.get("/api/logs")
+async def get_logs(
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(EmailLog).order_by(EmailLog.sent_at.desc())
+    )
+    logs = result.scalars().all()
+    return [
+        {
+            "id": l.id,
+            "sent_at": l.sent_at.isoformat(),
+            "date_from": l.date_from,
+            "date_to": l.date_to,
+            "recipients": json.loads(l.recipients) if l.recipients else [],
+            "subject": l.subject,
+            "total_rows": l.total_rows,
+            "status": l.status,
+            "error": l.error,
+        }
+        for l in logs
+    ]
 
 
 @app.get("/api/entries")
