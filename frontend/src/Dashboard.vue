@@ -65,6 +65,9 @@
               <a v-if="data && activeMode==='rango'" class="btn btn-danger waves-effect waves-light" @click="openEmailModal">
                 <i class="material-icons left">email</i>Enviar por correo
               </a>
+              <a v-if="data && activeMode==='rango'" class="btn waves-effect waves-light" style="background:#1A2744" @click="downloadCuentaCobro">
+                <i class="material-icons left">receipt</i>Descargar cuenta de cobro
+              </a>
             </div>
           </div>
         </div>
@@ -227,7 +230,7 @@
           <a class="btn-flat waves-effect modal-close"><i class="material-icons">close</i></a>
         </div>
         <div class="modal-body-inner">
-          <p class="modal-period">Período: <strong>{{ dateFrom }}</strong> al <strong>{{ dateTo }}</strong></p>
+          <p class="modal-period">Período: <strong>{{ emailDateFrom }}</strong> al <strong>{{ emailDateTo }}</strong></p>
 
           <div class="modal-field">
             <label>Asunto</label>
@@ -303,13 +306,19 @@ const selectedMonth  = ref(null)
 const selectedReport = ref(null)
 const dateFrom       = ref('')
 const dateTo         = ref('')
-const data           = ref(null)
+const monthData      = ref(null)   // datos del tab "mes"
+const rangeData      = ref(null)   // datos del tab "rango"
+const data           = computed(() => activeMode.value === 'rango' ? rangeData.value : monthData.value)
 const loading        = ref(false)
 const importing      = ref(false)
 const search         = ref('')
+let   monthFetchToken = 0
+let   rangeFetchToken = 0
 
 // ── Email ──
 const emailModal    = ref(false)
+const emailDateFrom = ref('')
+const emailDateTo   = ref('')
 const allRecipients = ref([])
 const extraEmail    = ref('')
 const emailSubject  = ref('')
@@ -320,7 +329,14 @@ const emailSuccess  = ref('')
 
 onMounted(() => {
   mTabs  = M.Tabs.init(tabsEl.value, {
-    onShow: (el) => { activeMode.value = el.id === 'tab-mes' ? 'mes' : 'rango' }
+    onShow: (el) => {
+      const newMode = el.id === 'tab-mes' ? 'mes' : 'rango'
+      if (newMode !== activeMode.value) {
+        destroyCharts()
+        loading.value = false
+      }
+      activeMode.value = newMode
+    }
   })
   mModal = M.Modal.init(modalEl.value, { dismissible: true })
 })
@@ -338,19 +354,23 @@ function authHeaders() { return { Authorization: `Bearer ${props.token}` } }
 async function loadMonth(month) {
   selectedMonth.value = month
   selectedReport.value = props.reports.find(r => r.month === month) || null
-  if (!selectedReport.value?.in_db) { data.value = null; return }
-  loading.value = true; data.value = null; destroyCharts()
+  if (!selectedReport.value?.in_db) { monthData.value = null; return }
+  const token = ++monthFetchToken
+  loading.value = true; monthData.value = null; destroyCharts()
   const res = await fetch(`/api/reports/${month}/data`, { headers: authHeaders() })
-  data.value = await res.json()
+  if (token !== monthFetchToken) return
+  monthData.value = await res.json()
   loading.value = false
   await nextTick(); renderCharts()
 }
 
 async function loadRange() {
   if (!dateFrom.value || !dateTo.value) return
-  loading.value = true; data.value = null; destroyCharts()
+  const token = ++rangeFetchToken
+  loading.value = true; rangeData.value = null; destroyCharts()
   const res = await fetch(`/api/entries?date_from=${dateFrom.value}&date_to=${dateTo.value}`, { headers: authHeaders() })
-  data.value = await res.json()
+  if (token !== rangeFetchToken) return
+  rangeData.value = await res.json()
   loading.value = false
   await nextTick(); renderCharts()
 }
@@ -384,12 +404,16 @@ const kpis = computed(() => {
 
 const filteredRows = computed(() => {
   if (!data.value) return []
+  let rows = data.value.rows
+  if (activeMode.value === 'rango' && dateFrom.value && dateTo.value) {
+    rows = rows.filter(r => r.date >= dateFrom.value && r.date <= dateTo.value)
+  }
   const q = search.value.toLowerCase()
-  return q ? data.value.rows.filter(r =>
+  return q ? rows.filter(r =>
     r.work_item_title.toLowerCase().includes(q) ||
     r.comment.toLowerCase().includes(q) ||
     r.type.toLowerCase().includes(q)
-  ) : data.value.rows
+  ) : rows
 })
 
 // ── Charts ──
@@ -435,12 +459,15 @@ function openEmailModal() {
   if (activeMode.value === 'mes' && selectedMonth.value) {
     const [y, m] = selectedMonth.value.split('-')
     const lastDay = new Date(+y, +m, 0).getDate()
-    dateFrom.value = `${y}-${m}-01`
-    dateTo.value   = `${y}-${m}-${String(lastDay).padStart(2, '0')}`
+    emailDateFrom.value = `${y}-${m}-01`
+    emailDateTo.value   = `${y}-${m}-${String(lastDay).padStart(2, '0')}`
+  } else {
+    emailDateFrom.value = dateFrom.value
+    emailDateTo.value   = dateTo.value
   }
   emailError.value = ''; emailSuccess.value = ''; extraEmail.value = ''
   allRecipients.value = []
-  emailSubject.value = `Reporte de horas Complemento 360 · ${dateFrom.value} al ${dateTo.value}`
+  emailSubject.value = `Reporte de horas Complemento 360 · ${emailDateFrom.value} al ${emailDateTo.value}`
   emailMessage.value = ''
   mModal.open()
 }
@@ -458,13 +485,39 @@ async function sendEmail() {
     const res = await fetch('/api/email/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ date_from: dateFrom.value, date_to: dateTo.value, extra_recipients: allRecipients.value, subject: emailSubject.value, message: emailMessage.value }),
+      body: JSON.stringify({ date_from: emailDateFrom.value, date_to: emailDateTo.value, extra_recipients: allRecipients.value, subject: emailSubject.value, message: emailMessage.value }),
     })
     const d = await res.json()
     if (!res.ok) { emailError.value = d.detail; return }
     emailSuccess.value = `✓ Correo enviado a ${d.sent_to.join(', ')}`
   } catch { emailError.value = 'Error al conectar' }
   finally { sending.value = false }
+}
+
+// ── Cuenta de cobro ──
+async function downloadCuentaCobro() {
+  if (!data.value || !dateFrom.value || !dateTo.value) return
+  try {
+    const res = await fetch('/api/cuenta-cobro/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ date_from: dateFrom.value, date_to: dateTo.value }),
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      alert(err.detail || 'Error al generar la cuenta de cobro')
+      return
+    }
+    const blob = await res.blob()
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `cuenta_cobro_${dateFrom.value}_${dateTo.value}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    alert('Error al conectar con el servidor')
+  }
 }
 
 // ── Helpers ──
