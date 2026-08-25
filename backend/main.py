@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,7 @@ from sqlalchemy import select, delete
 from database import init_db, get_session, TimeEntry, EmailLog
 from auth import verify_password, create_token, get_current_user, APP_USER
 from email_service import send_report_email
-from report_generator import build_excel, build_pdf
+from report_generator import build_excel, build_pdf, build_cuenta_cobro_pdf
 
 REPORTS_DIR  = Path(__file__).parent.parent / "reportes_mensuales"
 ENVIADOS_DIR = Path(__file__).parent.parent / "reportes_enviados"
@@ -180,6 +181,7 @@ async def list_reports(
             anio, mes = (m.split("-") + ["00"])[:2]
             reports.append({"filename": None, "month": m, "label": f"{month_names.get(mes, mes)} {anio}", "in_db": True})
 
+    reports.sort(key=lambda r: r["month"], reverse=True)
     return reports
 
 
@@ -321,6 +323,36 @@ async def get_logs(
         }
         for l in logs
     ]
+
+
+@app.post("/api/cuenta-cobro/download")
+async def download_cuenta_cobro(
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_current_user),
+):
+    date_from = payload.get("date_from")
+    date_to   = payload.get("date_to")
+    if not date_from or not date_to:
+        raise HTTPException(status_code=400, detail="date_from y date_to son requeridos")
+
+    query = (
+        select(TimeEntry)
+        .where(TimeEntry.date >= date_from, TimeEntry.date <= date_to)
+        .order_by(TimeEntry.date)
+    )
+    result = await db.execute(query)
+    rows = [entry_to_dict(e) for e in result.scalars().all()]
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hay datos en ese rango de fechas")
+
+    pdf_bytes = build_cuenta_cobro_pdf(date_from, date_to, rows, build_summary(rows))
+    filename  = f"cuenta_cobro_{date_from}_{date_to}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/entries")

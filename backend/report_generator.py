@@ -30,8 +30,12 @@ GRAY   = "64748B"
 WHITE  = "FFFFFF"
 BORDER_COLOR = "CBD5E1"
 
-# Alias para no romper referencias internas
-RED = ORANGE
+RED       = ORANGE
+HOUR_RATE = 60_000
+
+
+def _fmt_cop(amount: int) -> str:
+    return "$" + f"{amount:,}".replace(",", ".")
 
 
 def _hhmm(minutes: int) -> str:
@@ -473,6 +477,162 @@ def build_pdf(date_from: str, date_to: str, rows: list[dict], summary: dict) -> 
 
     doc.build(elements)
     return buf.getvalue()
+
+
+def build_cuenta_cobro_pdf(date_from: str, date_to: str, rows: list[dict], summary: dict) -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=1.5 * cm, rightMargin=1.5 * cm,
+        topMargin=1.5 * cm,  bottomMargin=1.5 * cm,
+    )
+
+    navy   = _rl_color(NAVY)
+    orange = _rl_color(ORANGE)
+    red    = orange
+
+    title_style  = ParagraphStyle("cc_title",  fontSize=18, textColor=colors.white,
+                                   fontName="Helvetica-Bold", alignment=0, leading=22)
+    sub_style    = ParagraphStyle("cc_sub",    fontSize=9,  textColor=colors.white,
+                                   fontName="Helvetica",      alignment=0, leading=13)
+    banner_style = ParagraphStyle("cc_banner", fontSize=9,  textColor=colors.white,
+                                   fontName="Helvetica",      alignment=1, leading=13)
+    h2_style     = ParagraphStyle("cc_h2",     fontSize=10, textColor=navy,
+                                   fontName="Helvetica-Bold", spaceAfter=4)
+    cell_style   = ParagraphStyle("cc_cell",   fontSize=8,  fontName="Helvetica", leading=10)
+
+    total        = summary["total_minutes"]
+    total_hours  = total / 60
+    total_cobrar = int(total_hours * HOUR_RATE)
+    unique_days  = len({r["date"] for r in rows})
+
+    elements = []
+
+    # ── Header ──
+    header_data = [[
+        Paragraph("Complemento 360", title_style),
+        Paragraph(
+            f"<b>{_hhmm(total)}</b> horas  ·  {len(rows)} registros  ·  {unique_days} días",
+            banner_style,
+        ),
+    ], [
+        Paragraph(
+            f"Cuenta de Cobro  ·  {date_from}  →  {date_to}  ·  Nestor Fabian Vargas Ferrucho",
+            sub_style,
+        ),
+        Paragraph("", sub_style),
+    ]]
+    header_tbl = Table(header_data, colWidths=["55%", "45%"])
+    header_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), orange),
+        ("BACKGROUND",    (0, 1), (-1, 1),  _rl_color("C65D0A")),
+        ("ALIGN",         (1, 0), (1, 0),   "RIGHT"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, 0),  14),
+        ("BOTTOMPADDING", (0, 0), (-1, 0),  14),
+        ("TOPPADDING",    (0, 1), (-1, 1),  8),
+        ("BOTTOMPADDING", (0, 1), (-1, 1),  8),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 16),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 16),
+    ]))
+    elements.append(header_tbl)
+    elements.append(Spacer(1, 0.3 * cm))
+
+    # ── KPI cards (tiempo) ──
+    kpi_data = [[
+        _kpi_cell("Total Horas",     _hhmm(total)),
+        _kpi_cell("Registros",       str(len(rows))),
+        _kpi_cell("Semanas",         str(len(summary["by_week"]))),
+        _kpi_cell("Work Items",      str(len(summary["by_work_item"]))),
+        _kpi_cell("Días trabajados", str(unique_days)),
+    ]]
+    kpi_tbl = Table(kpi_data, colWidths=[None] * 5)
+    kpi_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), _rl_color(LIGHT)),
+        ("BOX",           (0, 0), (-1, -1), 0.5, colors.white),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.5, colors.white),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(kpi_tbl)
+    elements.append(Spacer(1, 0.25 * cm))
+
+    # ── Facturación ──
+    billing_data = [[
+        _kpi_cell_billing("Valor por Hora", _fmt_cop(HOUR_RATE)),
+        _kpi_cell_billing("Total a Cobrar", _fmt_cop(total_cobrar)),
+    ]]
+    billing_tbl = Table(billing_data, colWidths=["50%", "50%"])
+    billing_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), _rl_color(NAVY)),
+        ("BOX",           (0, 0), (-1, -1), 1.5, orange),
+        ("INNERGRID",     (0, 0), (-1, -1), 1.5, orange),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    elements.append(billing_tbl)
+    elements.append(Spacer(1, 0.5 * cm))
+
+    # ── Por tipo + por semana ──
+    type_block = _pdf_summary_table(
+        "Horas por Tipo", ["Tipo", "Tiempo", "%"],
+        [[t["type"], _hhmm(t["minutes"]), f"{round(t['minutes']/total*100,1)}%"]
+         for t in summary["by_type"]],
+    )
+    week_block = _pdf_summary_table(
+        "Horas por Semana", ["Semana", "Tiempo"],
+        [[w["week"], _hhmm(w["minutes"])] for w in summary["by_week"]],
+    )
+    two_col = Table([[type_block, week_block]], colWidths=["60%", "40%"])
+    two_col.setStyle(TableStyle([
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
+    ]))
+    elements.append(two_col)
+    elements.append(Spacer(1, 0.5 * cm))
+
+    # ── Work items ──
+    elements.append(Paragraph("Horas por Work Item", h2_style))
+    wi_data = [["Work Item", "Tiempo", "%"]] + [
+        [Paragraph(w["title"], cell_style), _hhmm(w["minutes"]),
+         f"{round(w['minutes']/total*100,1)}%"]
+        for w in summary["by_work_item"]
+    ]
+    wi_tbl = Table(wi_data, colWidths=["75%", "12%", "13%"])
+    wi_tbl.setStyle(_base_table_style(navy, red))
+    elements.append(wi_tbl)
+    elements.append(Spacer(1, 0.5 * cm))
+
+    # ── Detalle ──
+    elements.append(Paragraph("Detalle de Registros", h2_style))
+    detail_data = [["Fecha", "Semana", "Work Item", "Tipo", "Comentario", "Tiempo"]] + [
+        [r["date"], r["week"],
+         Paragraph(r["work_item_title"], cell_style),
+         Paragraph(r["type"],            cell_style),
+         Paragraph(r["comment"],         cell_style),
+         _hhmm(r["minutes"])]
+        for r in rows
+    ]
+    det_tbl = Table(detail_data, colWidths=["9%", "9%", "25%", "15%", "33%", "9%"])
+    det_tbl.setStyle(_base_table_style(navy, red))
+    elements.append(det_tbl)
+
+    doc.build(elements)
+    return buf.getvalue()
+
+
+def _kpi_cell_billing(label: str, value: str):
+    return Paragraph(
+        f'<para align="center"><font size="8" color="#FFFFFF">{label}</font><br/>'
+        f'<font size="22" color="#{ORANGE}"><b>{value}</b></font></para>',
+        ParagraphStyle("kpi_billing", leading=30),
+    )
 
 
 def _kpi_cell(label: str, value: str):
