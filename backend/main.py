@@ -1,20 +1,21 @@
+import calendar
 import csv
 import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Form, File, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
-from database import init_db, get_session, TimeEntry, EmailLog
+from database import init_db, get_session, TimeEntry, EmailLog, HiddenContact
 from auth import verify_password, create_token, get_current_user, APP_USER
-from email_service import send_report_email, month_label, EMAIL_CONTACTS
-from report_generator import build_excel, build_pdf, build_cuenta_cobro_pdf
+from email_service import send_report_email, month_label, default_message, EMAIL_CONTACTS, EMAIL_CC, SMTP_FROM, SMTP_USER
+from report_generator import build_excel, build_pdf, build_cuenta_cobro_pdf, build_documento_soporte
 
 REPORTS_DIR  = Path(__file__).parent.parent / "reportes_mensuales"
 ENVIADOS_DIR = Path(__file__).parent.parent / "reportes_enviados"
@@ -92,6 +93,39 @@ def parse_csv_file(filepath: Path, report_month: str) -> list[dict]:
                 "parent_title": row.get("Parent Title", ""),
             })
     return rows
+
+
+def month_range(month: str) -> tuple[str, str]:
+    """'2026-11' -> ('2026-11-01', '2026-11-30'): mes calendario completo."""
+    y, m = (int(x) for x in month.split("-"))
+    return f"{y}-{m:02d}-01", f"{y}-{m:02d}-{calendar.monthrange(y, m)[1]:02d}"
+
+
+def cycle_range(month: str) -> tuple[str, str]:
+    """Ciclo de cuenta de cobro: '2026-11' -> ('2026-10-25', '2026-11-24')."""
+    y, m = (int(x) for x in month.split("-"))
+    py, pm = (y - 1, 12) if m == 1 else (y, m - 1)
+    return f"{py}-{pm:02d}-25", f"{y}-{m:02d}-24"
+
+
+async def load_rows(
+    db: AsyncSession,
+    date_from: str,
+    date_to: str,
+    month: str | None = None,
+    cycle: str | None = None,
+) -> list[dict]:
+    """Registros a reportar, siempre filtrados por fecha (no por el CSV del que vienen):
+    - `cycle` (pestaña cuenta de cobro): del 25 del mes anterior al 24 del mes.
+    - `month` (pestaña por mes): mes calendario completo.
+    - sin ninguno: el rango de fechas dado."""
+    if cycle:
+        date_from, date_to = cycle_range(cycle)
+    elif month:
+        date_from, date_to = month_range(month)
+    query = select(TimeEntry).where(TimeEntry.date >= date_from, TimeEntry.date <= date_to)
+    result = await db.execute(query.order_by(TimeEntry.date))
+    return [entry_to_dict(e) for e in result.scalars().all()]
 
 
 def build_summary(rows: list[dict]) -> dict:
@@ -211,10 +245,13 @@ async def get_report(
     month: str,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    cycle: bool = False,
     db: AsyncSession = Depends(get_session),
     _: str = Depends(get_current_user),
 ):
-    query = select(TimeEntry).where(TimeEntry.report_month == month)
+    # Ciclo de cuenta de cobro (25 al 24) o mes calendario (1 al último día), por fecha
+    month_from, month_to = cycle_range(month) if cycle else month_range(month)
+    query = select(TimeEntry).where(TimeEntry.date >= month_from, TimeEntry.date <= month_to)
     if date_from:
         query = query.where(TimeEntry.date >= date_from)
     if date_to:
@@ -245,40 +282,34 @@ async def send_email(
 
     if not date_from or not date_to:
         raise HTTPException(status_code=400, detail="date_from y date_to son requeridos")
-    subject = payload.get("subject") or f"Cuenta de cobro · {month_label(date_from)}"
+    # Correo de reporte de horas: Excel + PDF del reporte (la cuenta de cobro va en su propio envío)
+    subject = payload.get("subject") or f"Reporte de horas · {month_label(date_to)}"
 
-    query = (
-        select(TimeEntry)
-        .where(TimeEntry.date >= date_from, TimeEntry.date <= date_to)
-        .order_by(TimeEntry.date)
-    )
-    result = await db.execute(query)
-    rows = [entry_to_dict(e) for e in result.scalars().all()]
+    rows = await load_rows(db, date_from, date_to, payload.get("month"), payload.get("cycle"))
 
     if not rows:
         raise HTTPException(status_code=404, detail="No hay datos en ese rango de fechas")
 
     summary     = build_summary(rows)
+    if not message.strip():
+        message = default_message(date_to, kind="reporte", summary=summary, rows=rows)
     excel_bytes = build_excel(date_from, date_to, rows, summary)
     pdf_bytes   = build_pdf(date_from, date_to, rows, summary)
-    cobro_bytes = build_cuenta_cobro_pdf(date_from, date_to, rows, summary)
     try:
         sent_to = await send_report_email(
             date_from, date_to, summary, rows,
             extra_recipients=extra or None,
             excel_bytes=excel_bytes,
             pdf_bytes=pdf_bytes,
-            cuenta_cobro_bytes=cobro_bytes,
             subject=subject,
             message=message,
         )
         # Guardar archivos en reportes_enviados/<mes>/
-        month_folder = ENVIADOS_DIR / date_from[:7]
+        month_folder = ENVIADOS_DIR / date_to[:7]
         month_folder.mkdir(parents=True, exist_ok=True)
         base_name = f"reporte_{date_from}_{date_to}"
         (month_folder / f"{base_name}.xlsx").write_bytes(excel_bytes)
         (month_folder / f"{base_name}.pdf").write_bytes(pdf_bytes)
-        (month_folder / f"cuenta_cobro_{date_from}_{date_to}.pdf").write_bytes(cobro_bytes)
 
         db.add(EmailLog(
             date_from=date_from, date_to=date_to,
@@ -300,7 +331,140 @@ async def send_email(
         await db.commit()
         raise HTTPException(status_code=500, detail=str(e))
 
-    return {"sent_to": sent_to, "total_rows": len(rows)}
+    return {
+        "sent_to": sent_to,
+        "total_rows": len(rows),
+        "attachments": [f"reporte_{date_from}_{date_to}.xlsx", f"reporte_{date_from}_{date_to}.pdf"],
+    }
+
+
+PLANILLA_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
+PLANILLA_MAX_BYTES = 10 * 1024 * 1024
+PLANILLAS_REQUERIDAS = 2   # la planilla de aportes en línea llega en 2 archivos
+PLANILLAS_MAX = 4
+
+
+@app.post("/api/email/send-cuenta-cobro")
+async def send_cuenta_cobro_email(
+    date_from: str = Form(...),
+    date_to: str = Form(...),
+    extra_recipients: str = Form("[]"),   # JSON array
+    subject: str = Form(""),
+    message: str = Form(""),
+    month: str = Form(""),                 # pestaña por mes: mes calendario
+    cycle: str = Form(""),                 # pestaña cuenta de cobro: ciclo del 25 al 24
+    planillas: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_current_user),
+):
+    """Envía la cuenta de cobro (PDF), el reporte de horas (Excel) y el documento soporte
+    GAF-FOR-015 (generados), más los archivos de la planilla de aportes en línea (subidos, 2)."""
+    try:
+        extra = json.loads(extra_recipients or "[]")
+        if not isinstance(extra, list):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=400, detail="extra_recipients debe ser una lista JSON")
+    if not extra:
+        raise HTTPException(status_code=400, detail="Agrega al menos un destinatario")
+
+    planillas = [p for p in planillas if p.filename]
+    if len(planillas) < PLANILLAS_REQUERIDAS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La planilla de aportes en línea son {PLANILLAS_REQUERIDAS} archivos: "
+                   f"adjuntaste {len(planillas)}",
+        )
+    if len(planillas) > PLANILLAS_MAX:
+        raise HTTPException(status_code=400, detail=f"Máximo {PLANILLAS_MAX} archivos de planilla")
+
+    planilla_files: list[tuple[str, bytes, str]] = []   # (extensión, contenido, mime)
+    for p in planillas:
+        ext = Path(p.filename).suffix.lower()
+        if ext not in PLANILLA_TYPES:
+            raise HTTPException(status_code=400, detail=f"{p.filename}: la planilla debe ser PDF, PNG o JPG")
+        content = await p.read(PLANILLA_MAX_BYTES + 1)
+        if not content:
+            raise HTTPException(status_code=400, detail=f"{p.filename} está vacío")
+        if len(content) > PLANILLA_MAX_BYTES:
+            raise HTTPException(status_code=400, detail=f"{p.filename} supera 10 MB")
+        planilla_files.append((ext, content, PLANILLA_TYPES[ext]))
+
+    rows = await load_rows(db, date_from, date_to, month or None, cycle or None)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hay datos en ese rango de fechas")
+
+    subject = subject.strip() or f"Cuenta de cobro · {month_label(date_to)}"
+    summary = build_summary(rows)
+    cobro_bytes = build_cuenta_cobro_pdf(date_from, date_to, rows, summary)
+    try:
+        soporte_bytes = build_documento_soporte(date_from, date_to, summary)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    soporte_name  = f"documento_soporte_{date_to[:7]}.xlsx"
+    excel_bytes   = build_excel(date_from, date_to, rows, summary)
+    # planilla_aportes_2026-11_1.pdf, planilla_aportes_2026-11_2.pdf
+    planilla_named = [
+        (f"planilla_aportes_{date_to[:7]}_{i}{ext}", content, mime)
+        for i, (ext, content, mime) in enumerate(planilla_files, start=1)
+    ]
+    try:
+        sent_to = await send_report_email(
+            date_from, date_to, summary, rows,
+            extra_recipients=extra,
+            cuenta_cobro_bytes=cobro_bytes,
+            excel_bytes=excel_bytes,
+            extra_attachments=[
+                (soporte_name, soporte_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+                *planilla_named,
+            ],
+            detailed=False,
+            subject=subject,
+            message=message,
+        )
+        month_folder = ENVIADOS_DIR / date_to[:7]
+        month_folder.mkdir(parents=True, exist_ok=True)
+        (month_folder / f"cuenta_cobro_{date_from}_{date_to}.pdf").write_bytes(cobro_bytes)
+        (month_folder / f"reporte_{date_from}_{date_to}.xlsx").write_bytes(excel_bytes)
+        (month_folder / soporte_name).write_bytes(soporte_bytes)
+        for name, content, _mime in planilla_named:
+            (month_folder / name).write_bytes(content)
+
+        db.add(EmailLog(
+            date_from=date_from, date_to=date_to,
+            recipients=json.dumps(sent_to), subject=subject,
+            total_rows=len(rows), status="success",
+        ))
+        await db.commit()
+    except Exception as e:
+        db.add(EmailLog(
+            date_from=date_from, date_to=date_to,
+            recipients=json.dumps(extra), subject=subject,
+            total_rows=len(rows), status="error", error=str(e),
+        ))
+        await db.commit()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "sent_to": sent_to,
+        "attachments": [
+            f"cuenta_cobro_{date_from}_{date_to}.pdf",
+            f"reporte_{date_from}_{date_to}.xlsx",
+            soporte_name,
+            *[name for name, _, _ in planilla_named],
+        ],
+    }
+
+
+@app.get("/api/email/cc")
+async def get_email_cc(_: str = Depends(get_current_user)):
+    """Direcciones que reciben copia automática de todos los envíos."""
+    return EMAIL_CC
 
 
 @app.get("/api/email/contacts")
@@ -309,8 +473,12 @@ async def get_email_contacts(
     _: str = Depends(get_current_user),
 ):
     """Contactos configurados (EMAIL_CONTACTS) + destinatarios usados en envíos exitosos."""
-    contacts = list(EMAIL_CONTACTS)
-    known = {c["email"].lower() for c in contacts}
+    # La cuenta remitente y las de copia automática no se sugieren como destinatarios
+    # ni las que el usuario ocultó
+    hidden = await db.execute(select(HiddenContact.email))
+    excluded = {e.lower() for e in [SMTP_FROM, SMTP_USER, *EMAIL_CC] if e} | set(hidden.scalars().all())
+    contacts = [c for c in EMAIL_CONTACTS if c["email"].lower() not in excluded]
+    known = {c["email"].lower() for c in contacts} | excluded
     result = await db.execute(
         select(EmailLog.recipients).where(EmailLog.status == "success").order_by(EmailLog.sent_at.desc())
     )
@@ -320,6 +488,22 @@ async def get_email_contacts(
                 known.add(email.lower())
                 contacts.append({"name": "", "email": email})
     return contacts
+
+
+@app.delete("/api/email/contacts/{email}")
+async def hide_email_contact(
+    email: str,
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_current_user),
+):
+    """Quita un correo de las sugerencias (no afecta el historial de envíos)."""
+    key = email.strip().lower()
+    if not key:
+        raise HTTPException(status_code=400, detail="Correo vacío")
+    if not await db.get(HiddenContact, key):
+        db.add(HiddenContact(email=key))
+        await db.commit()
+    return {"hidden": key}
 
 
 @app.get("/api/logs")
@@ -347,6 +531,58 @@ async def get_logs(
     ]
 
 
+@app.post("/api/reporte/download")
+async def download_reporte(
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_current_user),
+):
+    """Excel del reporte de horas (Resumen, Por día, Detalle) del periodo visible."""
+    date_from = payload.get("date_from")
+    date_to   = payload.get("date_to")
+    if not date_from or not date_to:
+        raise HTTPException(status_code=400, detail="date_from y date_to son requeridos")
+
+    rows = await load_rows(db, date_from, date_to, payload.get("month"), payload.get("cycle"))
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hay datos en ese rango de fechas")
+
+    excel_bytes = build_excel(date_from, date_to, rows, build_summary(rows))
+    filename    = f"reporte_{date_from}_{date_to}.xlsx"
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/documento-soporte/download")
+async def download_documento_soporte(
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_current_user),
+):
+    """Documento soporte GAF-FOR-015 de Complemento 360 lleno con las horas del periodo."""
+    date_from = payload.get("date_from")
+    date_to   = payload.get("date_to")
+    if not date_from or not date_to:
+        raise HTTPException(status_code=400, detail="date_from y date_to son requeridos")
+
+    rows = await load_rows(db, date_from, date_to, payload.get("month"), payload.get("cycle"))
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hay datos en ese rango de fechas")
+    try:
+        xlsx = build_documento_soporte(date_from, date_to, build_summary(rows))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    filename = f"documento_soporte_{date_to[:7]}.xlsx"
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.post("/api/cuenta-cobro/download")
 async def download_cuenta_cobro(
     payload: dict,
@@ -358,13 +594,7 @@ async def download_cuenta_cobro(
     if not date_from or not date_to:
         raise HTTPException(status_code=400, detail="date_from y date_to son requeridos")
 
-    query = (
-        select(TimeEntry)
-        .where(TimeEntry.date >= date_from, TimeEntry.date <= date_to)
-        .order_by(TimeEntry.date)
-    )
-    result = await db.execute(query)
-    rows = [entry_to_dict(e) for e in result.scalars().all()]
+    rows = await load_rows(db, date_from, date_to, payload.get("month"), payload.get("cycle"))
     if not rows:
         raise HTTPException(status_code=404, detail="No hay datos en ese rango de fechas")
 

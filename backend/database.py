@@ -50,6 +50,13 @@ class EmailLog(Base):
     error: Mapped[str] = mapped_column(Text, default="")
 
 
+class HiddenContact(Base):
+    """Correos que el usuario quitó de las sugerencias de destinatarios."""
+    __tablename__ = "hidden_contacts"
+
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)   # en minúsculas
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

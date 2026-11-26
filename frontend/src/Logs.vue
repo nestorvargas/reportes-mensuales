@@ -158,10 +158,8 @@ function formatDate(iso) {
 .success-val { color: #2e7d32; }
 .error-val   { color: #c62828; }
 .stat-lbl {
-  font-size: 0.72rem;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: .04em;
+  font-size: 0.85rem;
+  color: #78909c;
   margin-top: 2px;
 }
 .status-chip {

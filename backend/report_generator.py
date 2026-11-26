@@ -2,8 +2,12 @@
 Generates Excel (.xlsx) and PDF reports from time entry data.
 """
 import io
+import os
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
+from pathlib import Path
+
+import openpyxl
 
 # ── openpyxl ──────────────────────────────────────────────────────────────
 from openpyxl import Workbook
@@ -673,3 +677,50 @@ def _base_table_style(header_bg, alt_bg):
         ("GRID",         (0, 0), (-1, -1), 0.3, _rl_color(BORDER_COLOR)),
         ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
     ])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DOCUMENTO SOPORTE (formato GAF-FOR-015 de Complemento 360)
+# ══════════════════════════════════════════════════════════════════════════
+
+_MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+             "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+# La plantilla tiene datos personales: vive fuera de git (reportes_mensuales/ está ignorado)
+DOCUMENTO_SOPORTE_TEMPLATE = Path(os.getenv(
+    "DOCUMENTO_SOPORTE_TEMPLATE",
+    str(Path(__file__).parent.parent / "reportes_mensuales" / "plantillas" / "GAF-FOR-015_documento_soporte.xlsx"),
+))
+DOCUMENTO_SOPORTE_CLIENTE = os.getenv("DOCUMENTO_SOPORTE_CLIENTE", "Colcomercio")
+
+
+def _fmt_horas(hours: float) -> str:
+    """110 -> '110'; 91.25 -> '91,25'."""
+    return str(int(hours)) if float(hours).is_integer() else f"{hours:.2f}".rstrip("0").replace(".", ",")
+
+
+def build_documento_soporte(date_from: str, date_to: str, summary: dict, fecha_operacion: date | None = None) -> bytes:
+    """Llena la plantilla GAF-FOR-015: fecha de operación, horas, detalle y valor unitario.
+    Subtotal, Reteica y Total quedan con las fórmulas de la plantilla."""
+    if not DOCUMENTO_SOPORTE_TEMPLATE.exists():
+        raise FileNotFoundError(f"No se encontró la plantilla del documento soporte: {DOCUMENTO_SOPORTE_TEMPLATE}")
+
+    fecha = fecha_operacion or date.today()
+    hours = round(summary["total_minutes"] / 60, 2)
+    mes = _MESES_ES[int(date_to[5:7]) - 1].capitalize()
+
+    wb = openpyxl.load_workbook(DOCUMENTO_SOPORTE_TEMPLATE)
+    ws = wb.worksheets[0]
+    ws["B12"] = f"Fecha de operación:  {fecha.day:02d} de {_MESES_ES[fecha.month - 1]} de {fecha.year}"
+    ws["B19"] = hours
+    if not float(hours).is_integer():
+        # La plantilla usa formato de moneda sin decimales: mostraría "$ 91" en vez de 91,25
+        ws["B19"].number_format = "0.00"
+    ws["C19"] = f"{_fmt_horas(hours)} horas de trabajo {DOCUMENTO_SOPORTE_CLIENTE} - mes {mes}"
+    ws["H19"] = HOUR_RATE
+    wb.calculation.fullCalcOnLoad = True   # que Excel/visores recalculen los totales al abrir
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+

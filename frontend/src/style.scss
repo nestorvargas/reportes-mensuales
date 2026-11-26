@@ -6,8 +6,9 @@ $primary-bg:    #FEF0E6;
 $secondary:     #6D6E71;
 $secondary-dark:#555556;
 $surface:       #fff;
-$bg:            #f5f5f5;
-$border:        #cfd8dc;
+$bg:            #f4f6f8;
+$border:        #dde3e8;
+$navy:          #1A2744;
 $text-muted:    #90a4ae;
 $text-dark:     #37474f;
 $font:          'Roboto', sans-serif;
@@ -18,7 +19,13 @@ $radius-lg: 10px;
 $radius-xl: 12px;
 
 // ── Global ────────────────────────────────────────────────────
-body { font-family: $font; background: $bg; }
+body { font-family: $font; background: $bg; color: $text-dark; }
+
+// Materialize pone en mayúsculas botones y pestañas: texto normal en toda la app
+.btn, .btn-small, .btn-large, .btn-flat, .tabs .tab a, nav ul a { text-transform: none; letter-spacing: normal; }
+.btn, .btn-small { border-radius: $radius-md; font-weight: 500; box-shadow: none; }
+.btn:hover, .btn-small:hover { box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+.card { box-shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04) !important; border: 1px solid #e8ecef; }
 
 .material-icons {
   vertical-align: middle;
@@ -63,21 +70,32 @@ nav.app-nav {
     transform: translateX(-50%);
 
     li {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 0 20px;
       height: 100%;
-      color: rgba(255,255,255,.75);
-      cursor: pointer;
-      font-size: .9rem;
-      font-weight: 500;
       border-bottom: 3px solid transparent;
-      transition: color .15s, border-color .15s;
+      transition: border-color .15s;
 
-      &:hover { color: $surface; background: rgba(255,255,255,.08); }
-      &.active { color: $surface; border-bottom-color: $surface; }
+      // Enlace real (permite abrir en otra pestaña); ocupa todo el alto del menú
+      a {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 100%;
+        padding: 0 20px;
+        color: rgba(255,255,255,.75);
+        font-size: .9rem;
+        font-weight: 500;
+        transition: color .15s, background .15s;
+        &:hover { color: $surface; background: rgba(255,255,255,.08); }
+      }
+      &.active { border-bottom-color: $surface; a { color: $surface; } }
     }
+  }
+
+  // En pantallas pequeñas: solo íconos y sin nombre de la marca para que nada se encime
+  @media (max-width: 760px) {
+    .brand-name { display: none; }
+    .nav-tabs li a { padding: 0 14px; .tab-label { display: none; } }
+    .logout-label { display: none; }
   }
 }
 
@@ -168,11 +186,9 @@ nav.app-nav {
   gap: 5px;
 
   label {
-    font-size: .72rem;
-    font-weight: 600;
+    font-size: .85rem;
+    font-weight: 500;
     color: #546e7a;
-    text-transform: uppercase;
-    letter-spacing: .05em;
   }
 
   input[type="date"] {
@@ -200,13 +216,17 @@ nav.app-nav {
 // Month chips
 .month-chips {
   .chip {
-    background: $primary-bg;
-    color: $primary;
+    background: $surface;
+    border: 1px solid $border;
+    color: $text-dark;
     font-weight: 500;
     cursor: pointer;
     transition: all .15s;
 
-    &.active { background: $primary; color: $surface; }
+    &:hover:not(.disabled):not(.active) { border-color: $primary; color: $primary-dark; }
+    &.active { background: $primary; border-color: $primary; color: $surface; }
+    .chip-sub { font-size: .75rem; color: #90a4ae; margin-left: 6px; font-weight: 400; }
+    &.active .chip-sub { color: rgba(255,255,255,.85); }
     &.disabled { opacity: .45; cursor: not-allowed; }
 
     .badge {
@@ -241,10 +261,15 @@ nav.app-nav {
   border-radius: $radius-lg !important;
   text-align: center;
 
-  .card-content { padding: 20px 12px !important; }
-  .kpi-icon .material-icons { font-size: 32px; color: $primary; }
-  .kpi-val { font-size: 2rem; font-weight: 800; color: $primary; line-height: 1.1; margin: 4px 0; }
-  .kpi-label { font-size: .72rem; color: $text-muted; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  text-align: left;
+  .card-content { padding: 16px 18px !important; display: flex; flex-direction: column; gap: 2px; }
+  .kpi-icon {
+    width: 34px; height: 34px; border-radius: $radius-md; background: $primary-bg;
+    display: flex; align-items: center; justify-content: center; margin-bottom: 8px;
+    .material-icons { font-size: 20px; color: $primary; }
+  }
+  .kpi-val { font-size: 1.7rem; font-weight: 700; color: $text-dark; line-height: 1.15; }
+  .kpi-label { font-size: .85rem; color: #78909c; }
 }
 
 // Chart cards
@@ -255,14 +280,43 @@ nav.app-nav {
   &.wide canvas { max-height: 180px; }
 }
 .chart-title {
-  font-size: .88rem;
-  font-weight: 700;
-  color: $primary;
-  margin-bottom: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: $text-dark;
+  margin-bottom: 14px;
   display: flex;
   align-items: center;
   gap: 6px;
-  .material-icons { font-size: 18px; }
+  .material-icons { font-size: 20px; color: $primary; }
+}
+
+// Distribución por tipo: dona + leyenda propia con horas y porcentaje
+.type-dist {
+  display: flex; align-items: center; gap: 20px;
+  @media (max-width: 1100px) { flex-direction: column; align-items: stretch; }
+}
+.type-donut {
+  position: relative; flex: 0 0 170px; height: 170px; align-self: center; width: 170px;
+  canvas { max-height: 170px !important; }
+}
+.type-donut-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; pointer-events: none;
+  strong { font-size: 1.3rem; font-weight: 700; color: $text-dark; line-height: 1.1; }
+  span { font-size: .8rem; color: #78909c; }
+}
+.type-legend {
+  flex: 1; min-width: 0; margin: 0; padding: 0;
+  li {
+    list-style: none; display: flex; align-items: center; gap: 8px;
+    padding: 5px 0; font-size: .85rem; border-bottom: 1px solid #f1f4f6;
+    &:last-child { border-bottom: none; }
+  }
+  .dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .name { flex: 1; min-width: 0; color: $text-dark; line-height: 1.3; }
+  .val, .pct { white-space: nowrap; }
+  .val { font-weight: 600; color: $text-dark; }
+  .pct { width: 36px; text-align: right; color: #78909c; }
 }
 
 // Summary / detail tables
@@ -277,16 +331,20 @@ nav.app-nav {
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid #eceff1;
-  h6 { margin: 0; font-weight: 700; color: $primary; }
+  gap: 12px; flex-wrap: wrap;
+  h6 { margin: 0; font-size: 1rem; font-weight: 600; color: $text-dark; display: flex; align-items: center; gap: 6px; }
+  h6 .material-icons { color: $primary; }
+  .row-count { font-size: .85rem; font-weight: 400; color: #78909c; }
 }
 .table-search {
   position: relative;
+  flex: 0 1 260px; min-width: 0;
   .material-icons { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: $text-muted; font-size: 20px; }
   input {
     padding: 8px 12px 8px 34px !important;
     border: 1.5px solid $border !important;
     border-radius: $radius-md !important;
-    width: 240px; font-size: .88rem; outline: none;
+    width: 100% !important; box-sizing: border-box !important; font-size: .88rem; outline: none;
     margin: 0 !important; box-shadow: none !important; height: auto !important;
     &:focus { border-color: $primary !important; box-shadow: none !important; }
   }
@@ -297,21 +355,26 @@ nav.app-nav {
   font-size: .85rem;
 
   th {
-    background: $primary;
-    color: $surface;
+    background: #f8fafb;
+    color: #546e7a;
     padding: 10px 14px;
     text-align: left;
-    font-size: .75rem;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    font-weight: 600;
+    font-size: .85rem;
+    font-weight: 500;
+    border-bottom: 1px solid $border;
+    white-space: nowrap;
   }
-  td { padding: 9px 14px; border-bottom: 1px solid #f5f5f5; }
-  tr:hover td { background: $primary-bg; }
+  td { padding: 10px 14px; border-bottom: 1px solid #eef1f3; vertical-align: top; }
+  tbody tr:hover td { background: #fffaf6; }
   tr:last-child td { border-bottom: none; }
 }
-.bar-wrap { background: #eceff1; border-radius: 4px; height: 5px; margin-top: 4px; width: 140px; }
-.bar-fill { background: $secondary; border-radius: 4px; height: 5px; }
+.bar-wrap { background: #eef1f3; border-radius: 4px; height: 6px; margin-top: 6px; width: 100%; max-width: 140px; }
+.bar-fill { background: $primary; border-radius: 4px; height: 6px; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-more {
+  display: flex; justify-content: center; padding: 12px; border-top: 1px solid #eef1f3;
+}
+.muted { color: #78909c; }
 
 // Tag chips
 .tag-chip {
@@ -322,7 +385,7 @@ nav.app-nav {
   font-weight: 600;
 
   &.admin   { background: #fff8e1; color: #f57f17; }
-  &.dev     { background: #e8f5e9; color: $primary; }
+  &.dev     { background: #e8f5e9; color: #2e7d32; }
   &.est     { background: #fce4ec; color: #880e4f; }
   &.default { background: $primary-bg; color: $primary; }
 }
@@ -353,14 +416,46 @@ nav.app-nav {
   gap: 14px;
 }
 .modal-period {
-  font-size: .85rem; color: #78909c; margin: 0;
-  strong { color: $primary; }
+  font-size: .9rem; color: #546e7a; margin: 0;
+  background: #f8fafb; border: 1px solid #eef1f3; border-radius: $radius-md; padding: 10px 12px;
+  display: flex; align-items: center; gap: 8px;
+  .material-icons { color: $primary; font-size: 18px; }
+  strong { color: $text-dark; font-weight: 600; }
+}
+// .modal-field .drop-zone: más específico que ".modal-field label" (que la pondría en bloque)
+.modal-field .drop-zone, .drop-zone {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
+  margin-bottom: 0; font-weight: 400;
+  padding: 18px 16px; border: 1.5px dashed $border; border-radius: $radius-md;
+  background: #fafbfc; cursor: pointer; transition: border-color .15s, background .15s;
+  input[type=file] { display: none; }
+  .material-icons { font-size: 30px; color: $primary; }
+  .drop-title { font-size: .9rem; font-weight: 500; color: $text-dark; }
+  .drop-sub { font-size: .8rem; color: #78909c; }
+  &:hover, &.dragging { border-color: $primary; background: #fffaf6; }
+  &.full { opacity: .6; }
+}
+.drop-files {
+  margin: 8px 0 0; padding: 0;
+  li {
+    list-style: none; display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border: 1px solid #eef1f3; border-radius: $radius-sm;
+    font-size: .85rem; margin-bottom: 6px; background: $surface;
+    > .material-icons { color: $primary; }
+  }
+  .drop-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: $text-dark; }
+  .drop-file-size { color: #90a4ae; font-size: .8rem; white-space: nowrap; }
+  .drop-file-remove { cursor: pointer; color: #b0bec5; display: flex; &:hover { color: #c62828; } }
+}
+.file-picker {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  input[type=file] { display: none; }
+  .file-name { font-size: .85rem; color: #546e7a; word-break: break-all; }
 }
 .modal-field {
   label {
-    font-size: .75rem; font-weight: 600; color: #546e7a;
-    display: block; margin-bottom: 5px;
-    text-transform: uppercase; letter-spacing: .04em;
+    font-size: .9rem; font-weight: 500; color: $text-dark;
+    display: block; margin-bottom: 6px;
   }
   input[type=text], input[type=email] {
     width: 100%; padding: 9px 12px; border: 1.5px solid $border;
@@ -390,12 +485,27 @@ nav.app-nav {
     margin: 0; background: transparent; border: 1.5px dashed $border; color: #546e7a;
     cursor: pointer; font-size: .8rem; display: inline-flex; align-items: center;
     &:hover { border-color: $primary; color: $primary; }
+    .contact-remove {
+      margin-left: 6px; color: #b0bec5; border-radius: 50%;
+      &:hover { color: $secondary-dark; background: #ffebee; }
+    }
   }
+}
+.chip.cc-chip { background: #eceff1; color: #546e7a; cursor: default; }
+.attachment-list {
+  margin: 4px 0 10px; padding: 0;
+  li {
+    list-style: none; display: flex; align-items: center; gap: 6px;
+    font-size: .88rem; padding: 3px 0;
+    &.ok i      { color: #2e7d32; }
+    &.missing   { color: $secondary-dark; }
+  }
+  .attachment-note { color: #90a4ae; font-size: .8rem; }
 }
 .modal-add-row { display: flex; gap: 8px; margin-top: 8px; input { flex: 1; } }
 .modal-hint  { font-size: .75rem; color: #b0bec5; margin: 4px 0 0; }
 .modal-error { background: #ffebee; color: $secondary-dark; border-radius: $radius-md; padding: 10px 14px; font-size: .85rem; }
-.modal-success { background: #e8f5e9; color: $primary; border-radius: $radius-md; padding: 10px 14px; font-size: .85rem; }
+.modal-success { background: #e8f5e9; color: #2e7d32; border-radius: $radius-md; padding: 10px 14px; font-size: .85rem; }
 .modal-foot {
   display: flex; justify-content: flex-end; gap: 10px;
   padding: 14px 24px; border-top: 1px solid #eceff1;
@@ -405,8 +515,9 @@ nav.app-nav {
 .btn-primary { background: $primary !important; &:hover { background: $primary-dark !important; } }
 .btn-danger  { background: $secondary !important; &:hover { background: $secondary-dark !important; } }
 .btn-outline {
-  border: 1.5px solid $border !important; color: #546e7a !important;
-  background: transparent !important; box-shadow: none !important;
+  border: 1px solid $border !important; color: $text-dark !important;
+  background: $surface !important; box-shadow: none !important;
+  &:hover { border-color: $primary !important; color: $primary-dark !important; background: #fffaf6 !important; }
 }
 
 // Misc
@@ -424,8 +535,16 @@ nav.app-nav {
 // Mes actions bar
 .mes-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
   padding-top: 14px;
   margin-top: 12px;
-  border-top: 1px solid $border;
+  border-top: 1px solid #eef1f3;
+}
+.range-actions { flex-wrap: wrap; }
+.mes-actions { align-items: center; .period-label { margin-right: auto; font-size: .9rem; display: inline-flex; align-items: center; gap: 4px; } }
+@media (max-width: 600px) {
+  .mes-actions, .range-actions { justify-content: stretch; .btn { flex: 1 1 100%; } }
+  .table-search input { width: 100%; }
 }
