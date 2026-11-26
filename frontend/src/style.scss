@@ -384,6 +384,14 @@ nav.app-nav {
     &:hover { background: #ffebee; color: $secondary-dark; }
   }
 }
+.contact-options {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+  .chip {
+    margin: 0; background: transparent; border: 1.5px dashed $border; color: #546e7a;
+    cursor: pointer; font-size: .8rem; display: inline-flex; align-items: center;
+    &:hover { border-color: $primary; color: $primary; }
+  }
+}
 .modal-add-row { display: flex; gap: 8px; margin-top: 8px; input { flex: 1; } }
 .modal-hint  { font-size: .75rem; color: #b0bec5; margin: 4px 0 0; }
 .modal-error { background: #ffebee; color: $secondary-dark; border-radius: $radius-md; padding: 10px 14px; font-size: .85rem; }

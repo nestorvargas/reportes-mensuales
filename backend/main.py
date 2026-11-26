@@ -13,7 +13,7 @@ from sqlalchemy import select, delete
 
 from database import init_db, get_session, TimeEntry, EmailLog
 from auth import verify_password, create_token, get_current_user, APP_USER
-from email_service import send_report_email
+from email_service import send_report_email, month_label, EMAIL_CONTACTS
 from report_generator import build_excel, build_pdf, build_cuenta_cobro_pdf
 
 REPORTS_DIR  = Path(__file__).parent.parent / "reportes_mensuales"
@@ -241,11 +241,11 @@ async def send_email(
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
     extra = payload.get("extra_recipients", [])
-    subject = payload.get("subject") or f"Reporte Complemento 360 · {date_from} al {date_to}"
     message = payload.get("message", "")
 
     if not date_from or not date_to:
         raise HTTPException(status_code=400, detail="date_from y date_to son requeridos")
+    subject = payload.get("subject") or f"Cuenta de cobro · {month_label(date_from)}"
 
     query = (
         select(TimeEntry)
@@ -261,12 +261,14 @@ async def send_email(
     summary     = build_summary(rows)
     excel_bytes = build_excel(date_from, date_to, rows, summary)
     pdf_bytes   = build_pdf(date_from, date_to, rows, summary)
+    cobro_bytes = build_cuenta_cobro_pdf(date_from, date_to, rows, summary)
     try:
         sent_to = await send_report_email(
             date_from, date_to, summary, rows,
             extra_recipients=extra or None,
             excel_bytes=excel_bytes,
             pdf_bytes=pdf_bytes,
+            cuenta_cobro_bytes=cobro_bytes,
             subject=subject,
             message=message,
         )
@@ -276,6 +278,7 @@ async def send_email(
         base_name = f"reporte_{date_from}_{date_to}"
         (month_folder / f"{base_name}.xlsx").write_bytes(excel_bytes)
         (month_folder / f"{base_name}.pdf").write_bytes(pdf_bytes)
+        (month_folder / f"cuenta_cobro_{date_from}_{date_to}.pdf").write_bytes(cobro_bytes)
 
         db.add(EmailLog(
             date_from=date_from, date_to=date_to,
@@ -298,6 +301,25 @@ async def send_email(
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"sent_to": sent_to, "total_rows": len(rows)}
+
+
+@app.get("/api/email/contacts")
+async def get_email_contacts(
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_current_user),
+):
+    """Contactos configurados (EMAIL_CONTACTS) + destinatarios usados en envíos exitosos."""
+    contacts = list(EMAIL_CONTACTS)
+    known = {c["email"].lower() for c in contacts}
+    result = await db.execute(
+        select(EmailLog.recipients).where(EmailLog.status == "success").order_by(EmailLog.sent_at.desc())
+    )
+    for raw in result.scalars().all():
+        for email in json.loads(raw) if raw else []:
+            if email.lower() not in known:
+                known.add(email.lower())
+                contacts.append({"name": "", "email": email})
+    return contacts
 
 
 @app.get("/api/logs")

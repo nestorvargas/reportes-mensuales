@@ -14,3 +14,4 @@ build/
 /backend/.env
 /reportes_enviados/
 /reportes_mensuales/
+.claude/

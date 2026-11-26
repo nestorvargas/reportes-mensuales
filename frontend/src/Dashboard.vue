@@ -226,7 +226,7 @@
     <div id="emailModal" class="modal email-modal" ref="modalEl">
       <div class="modal-content">
         <div class="modal-head">
-          <h5><i class="material-icons left" style="font-size:20px;vertical-align:middle">email</i> Enviar reporte por correo</h5>
+          <h5><i class="material-icons left" style="font-size:20px;vertical-align:middle">email</i> Enviar cuenta de cobro por correo</h5>
           <a class="btn-flat waves-effect modal-close"><i class="material-icons">close</i></a>
         </div>
         <div class="modal-body-inner">
@@ -238,12 +238,19 @@
           </div>
 
           <div class="modal-field">
-            <label>Mensaje para el jefe</label>
-            <textarea v-model="emailMessage" rows="4" placeholder="Escribe aquí tu mensaje personal…"></textarea>
+            <label>Mensaje</label>
+            <textarea v-model="emailMessage" rows="7" placeholder="Escribe aquí tu mensaje…"></textarea>
           </div>
 
           <div class="modal-field">
             <label>Destinatarios</label>
+            <div v-if="availableContacts.length" class="contact-options">
+              <div
+                v-for="c in availableContacts" :key="c.email"
+                class="chip contact-option" @click="addContact(c)"
+                :title="c.email"
+              ><i class="material-icons tiny" style="margin-right:4px">person_add</i>{{ c.name ? `${c.name} · ${c.email}` : c.email }}</div>
+            </div>
             <div class="recipient-chips">
               <div
                 v-for="(r, i) in allRecipients" :key="r"
@@ -326,6 +333,18 @@ const emailMessage  = ref('')
 const sending       = ref(false)
 const emailError    = ref('')
 const emailSuccess  = ref('')
+const contacts      = ref([])
+const availableContacts = computed(() => contacts.value.filter(c => !allRecipients.value.includes(c.email)))
+
+const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+function monthLabel(date) {
+  const [y, m] = date.split('-')
+  return `${MESES[+m - 1]} de ${y}`
+}
+function buildMessage(name) {
+  return `Hola ${name},\n\nAdjunto cuenta de cobro del mes de ${monthLabel(emailDateFrom.value)}.\n\nCordialmente,\nFabian Vargas`
+}
+let greetingName = 'Diego'
 
 onMounted(() => {
   mTabs  = M.Tabs.init(tabsEl.value, {
@@ -467,9 +486,28 @@ function openEmailModal() {
   }
   emailError.value = ''; emailSuccess.value = ''; extraEmail.value = ''
   allRecipients.value = []
-  emailSubject.value = `Reporte de horas Complemento 360 · ${emailDateFrom.value} al ${emailDateTo.value}`
-  emailMessage.value = ''
+  greetingName = 'Diego'
+  emailSubject.value = `Cuenta de cobro · ${monthLabel(emailDateFrom.value)}`
+  emailMessage.value = buildMessage(greetingName)
+  loadContacts()
   mModal.open()
+}
+
+async function loadContacts() {
+  try {
+    const res = await fetch('/api/email/contacts', { headers: authHeaders() })
+    if (res.ok) contacts.value = await res.json()
+  } catch { /* sin sugerencias */ }
+}
+
+function addContact(c) {
+  if (!allRecipients.value.includes(c.email)) allRecipients.value.push(c.email)
+  // Ajusta el saludo al primer contacto con nombre, si el mensaje no se ha editado
+  const firstName = c.name.split(' ')[0]
+  if (firstName && emailMessage.value === buildMessage(greetingName) && allRecipients.value.length === 1) {
+    greetingName = firstName
+    emailMessage.value = buildMessage(greetingName)
+  }
 }
 
 function addRecipient() {
